@@ -1,1193 +1,149 @@
-import React, { useState, useEffect } from 'react';
-import { 
-  Shield, AlertTriangle, FileText, User, CreditCard, Activity, Folder, 
-  CheckSquare, Printer, Truck, AlertCircle, CheckCircle, Menu, X, Info, 
-  HelpCircle, ChevronRight, ChevronLeft, Check, Store, CheckCircle2
-} from 'lucide-react';
-
-// --- COMPONENTES DE UI ---
-const Tooltip = ({ text }) => (
-  <div className="relative group inline-block ml-1.5 align-middle">
-    <HelpCircle className="w-4 h-4 text-slate-400 hover:text-blue-500 cursor-help transition-colors" />
-    <div className="absolute bottom-full left-1/2 -translate-x-1/2 mb-2 hidden group-hover:block w-56 p-2.5 bg-slate-900 text-white text-[11px] font-medium rounded-lg shadow-xl z-50 text-center leading-relaxed">
-      {text}
-      <div className="absolute top-full left-1/2 -translate-x-1/2 border-4 border-transparent border-t-slate-900"></div>
-    </div>
-  </div>
-);
-
-const ValidatedInput = ({ value, onChange, placeholder, formatFn, validateFn, type = "text", maxLength }) => {
-  const formattedValue = formatFn ? formatFn(value) : value;
-  const isValid = validateFn ? validateFn(formattedValue) : formattedValue.length > 0;
-  
-  return (
-    <div className="relative flex items-center">
-      <input 
-        type={type}
-        value={formattedValue}
-        onChange={(e) => onChange(e.target.value)}
-        placeholder={placeholder}
-        maxLength={maxLength}
-        className={`w-full p-3 pr-10 bg-white border rounded-xl text-sm outline-none transition-all focus:ring-2 ${isValid && formattedValue ? 'border-emerald-300 focus:ring-emerald-200' : formattedValue ? 'border-amber-300 focus:ring-amber-200' : 'border-slate-200 focus:border-blue-500 focus:ring-blue-100'}`}
-      />
-      {formattedValue && isValid && <Check className="w-4 h-4 text-emerald-500 absolute right-3" />}
-      {formattedValue && !isValid && <AlertCircle className="w-4 h-4 text-amber-500 absolute right-3" />}
-    </div>
-  );
-};
-
-// --- FORMATAÇÕES E VALIDAÇÕES ---
-const formatCPF = (val) => {
-  let v = val.replace(/\D/g, '');
-  if (v.length <= 11) {
-    v = v.replace(/(\d{3})(\d)/, '$1.$2');
-    v = v.replace(/(\d{3})(\d)/, '$1.$2');
-    v = v.replace(/(\d{3})(\d{1,2})$/, '$1-$2');
-  } else {
-    v = v.replace(/^(\d{2})(\d)/, '$1.$2');
-    v = v.replace(/^(\d{2})\.(\d{3})(\d)/, '$1.$2.$3');
-    v = v.replace(/\.(\d{3})(\d)/, '.$1/$2');
-    v = v.replace(/(\d{4})(\d)/, '$1-$2');
-  }
-  return v.slice(0, 18);
-};
-const isValidCPF = (v) => v.replace(/\D/g, '').length === 11 || v.replace(/\D/g, '').length === 14;
-
-const formatPhone = (val) => {
-  let v = val.replace(/\D/g, '');
-  v = v.replace(/^(\d{2})(\d)/g, '($1) $2');
-  v = v.replace(/(\d)(\d{4})$/, '$1-$2');
-  return v.slice(0, 15);
-};
-const isValidPhone = (v) => v.replace(/\D/g, '').length >= 10;
-
-const formatCEP = (val) => {
-  let v = val.replace(/\D/g, '');
-  v = v.replace(/^(\d{5})(\d)/, '$1-$2');
-  return v.slice(0, 9);
-};
-const isValidCEP = (v) => v.replace(/\D/g, '').length === 8;
-
-const App = () => {
-  // --- ESTADO GERAL ---
-  const [currentStep, setCurrentStep] = useState(1);
-  const [printMode, setPrintMode] = useState(''); // 'anexo1' ou 'anexo2'
-
-  // Passo 1: Financeiro & Dados Básicos
-  const [ticketMedio, setTicketMedio] = useState(1200);
-  const [vendaValor, setVendaValor] = useState('');
-  const [numPedido, setNumPedido] = useState('');
-  const [nomeComprador, setNomeComprador] = useState('');
-  const [cpfComprador, setCpfComprador] = useState('');
-  const [telefoneComprador, setTelefoneComprador] = useState('');
-  const [produtosDescricao, setProdutosDescricao] = useState('');
-  const [parcelas, setParcelas] = useState('1');
-  const [dataVenda, setDataVenda] = useState(new Date().toISOString().split('T')[0]);
-  const [nomeEmpresa, setNomeEmpresa] = useState('');
-  const [vendedorResponsavel, setVendedorResponsavel] = useState('');
-
-  // Passo 2: Perfil & Histórico
-  const [numComprasAnteriores, setNumComprasAnteriores] = useState('0'); // '0', '1', '2+'
-  const [historicoFraude, setHistoricoFraude] = useState(false);
-  const [produtoCompativel, setProdutoCompativel] = useState(true);
-
-  // Passo 3: Logística
-  const [tipoRecebimento, setTipoRecebimento] = useState('delivery');
-  const [retiradaPorTerceiro, setRetiradaPorTerceiro] = useState(false);
-  const [dentroRegiao, setDentroRegiao] = useState(true);
-  const [mudancaEndereco, setMudancaEndereco] = useState(false);
-  const [pedidoUrgencia, setPedidoUrgencia] = useState(false);
-  const [endereco, setEndereco] = useState({ cep: '', rua: '', numero: '', bairro: '', complemento: '', cidade: '', estado: '' });
-
-  // Passo 4: Pagamento
-  const [isMultiplosCartoes, setIsMultiplosCartoes] = useState(false);
-  const [qtdCartoes, setQtdCartoes] = useState(1);
-  const [cards, setCards] = useState([
-    { id: 1, ownerType: 'self', nome: '', cpf: '', telefone: '', email: '' },
-    { id: 2, ownerType: 'self', nome: '', cpf: '', telefone: '', email: '' },
-    { id: 3, ownerType: 'self', nome: '', cpf: '', telefone: '', email: '' }
-  ]);
-
-  // Checklist final
-  const [checklist, setChecklist] = useState({});
-
-  // Menu Mobile
-  const [menuOpen, setMenuOpen] = useState(false);
-
-  // --- FUNÇÃO PARA ZERAR DADOS E INICIAR NOVA VENDA ---
-  const handleReset = () => {
-    setCurrentStep(1);
-    setPrintMode('');
-    
-    // Preservar apenas campos fixos
-    setVendaValor('');
-    setNumPedido('');
-    setNomeComprador('');
-    setCpfComprador('');
-    setTelefoneComprador('');
-    setProdutosDescricao('');
-    setParcelas('1');
-    setDataVenda(new Date().toISOString().split('T')[0]);
-    
-    setNumComprasAnteriores('0');
-    setHistoricoFraude(false);
-    setProdutoCompativel(true);
-    
-    setTipoRecebimento('delivery');
-    setRetiradaPorTerceiro(false);
-    setDentroRegiao(true);
-    setMudancaEndereco(false);
-    setPedidoUrgencia(false);
-    setEndereco({ cep: '', rua: '', numero: '', bairro: '', complemento: '', cidade: '', estado: '' });
-    
-    setIsMultiplosCartoes(false);
-    setQtdCartoes(1);
-    setCards([
-      { id: 1, ownerType: 'self', nome: '', cpf: '', telefone: '', email: '' },
-      { id: 2, ownerType: 'self', nome: '', cpf: '', telefone: '', email: '' },
-      { id: 3, ownerType: 'self', nome: '', cpf: '', telefone: '', email: '' }
-    ]);
-    
-    setChecklist({});
-    window.scrollTo(0, 0);
-  };
-
-  // Lógica de Impressão Segura (Gatilhos do Browser)
-  useEffect(() => {
-    const handleAfterPrint = () => {
-      setPrintMode('');
-    };
-    window.addEventListener('afterprint', handleAfterPrint);
-    return () => window.removeEventListener('afterprint', handleAfterPrint);
-  }, []);
-
-  const handlePrint = (docType) => {
-    setPrintMode(docType);
-    setTimeout(() => {
-      window.print();
-    }, 500); 
-  };
-
-  // --- LÓGICA DE RISCO (Motor de Regras) ---
-  const calculateRisk = () => {
-    let r = 'baixo';
-    let rules = [];
-    const valVendaNum = Number(vendaValor) || 0;
-    const mult = valVendaNum / (Number(ticketMedio) || 1);
-
-    if (valVendaNum > 0) {
-      if (mult > 1 && mult <= 2) { r = 'médio'; rules.push('Venda entre 1x e 2x o ticket médio da empresa (Regra 6.3.1).'); }
-      if (mult > 2) { r = 'alto'; rules.push('Venda acima de 2x o ticket médio da empresa (Regra 9.1.2.1).'); }
-    }
-
-    if (numComprasAnteriores === '0' || numComprasAnteriores === '1') {
-      if (r === 'baixo') r = 'médio';
-      rules.push('Cliente sem histórico recorrente (mínimo 2 compras exigido) (Regra 8.1.2.1).');
-    }
-    if (historicoFraude) {
-      r = 'alto';
-      rules.push('Cliente possui histórico prévio de fraude ou chargeback (Regra 7.1.3.1.2).');
-    }
-    if (!produtoCompativel) {
-      if (r === 'baixo') r = 'médio';
-      rules.push('Produto incompatível com a atividade comercial do cliente (Regra 7.1.2.2).');
-    }
-
-    if (tipoRecebimento === 'delivery') {
-      if (!dentroRegiao) {
-        r = 'alto';
-        rules.push('Entrega solicitada fora da região habitual de atuação (Regra 9.1.2.3).');
-      }
-      if (mudancaEndereco) {
-        if (r === 'baixo') r = 'médio';
-        rules.push('Alteração de endereço de entrega solicitada (Regra 6.6.1.3).');
-      }
-      if (pedidoUrgencia) {
-        rules.push('Alerta: Pedido com urgência atípica na entrega (Sinal de Risco).');
-      }
-    } else {
-      if (retiradaPorTerceiro) {
-        r = 'alto';
-        rules.push('Retirada presencial será feita por terceiro não comprador (Regra 9.1.2.5).');
-      }
-    }
-
-    const thirdPartyCards = cards.slice(0, isMultiplosCartoes ? qtdCartoes : 1).filter(c => c.ownerType === 'third');
-    if (thirdPartyCards.length > 0) {
-      r = 'alto';
-      rules.push(`Identificado o uso de ${thirdPartyCards.length} cartão(ões) de terceiro(s) (Regra 10.1.2).`);
-    }
-
-    if (isMultiplosCartoes && qtdCartoes > 1) {
-      r = 'alto';
-      rules.push('Utilização de múltiplos cartões na mesma transação (Regra 11.1.3).');
-      if (qtdCartoes >= 3) {
-        rules.push('ATENÇÃO: O uso de 3 cartões requer validação expressa e excepcional da gestão (Regra 11.3.1.2).');
-      }
-    }
-
-    if (rules.length === 0 && valVendaNum > 0) {
-      rules.push('Transação dentro de todos os parâmetros normais de segurança (Baixo Risco).');
-    }
-
-    return { nivel: r, rules, multiplicador: mult };
-  };
-
-  const riskData = calculateRisk();
-
-  // --- ESTRUTURA DO CHECKLIST FIEL À POLÍTICA (Exclusiva por Risco) ---
-  const getChecklistGroups = () => {
-    const groups = [
-      {
-        title: '3. Verificações Obrigatórias (Todas as vendas)',
-        items: [
-          'Pedido ou orçamento registrado contendo descrição dos produtos ou serviços',
-          'Quantidade de produtos ou serviços registrada',
-          'Valor total da compra registrado',
-          'Endereço completo de entrega registrado',
-          'Forma de pagamento registrada',
-          'Confirmação da compra obtida junto ao cliente',
-          'Confirmação da compra registrada na conversa comercial',
-          'Forma de pagamento confirmada com o cliente',
-          'Pagamento aprovado na plataforma de pagamento utilizada',
-          'Nota fiscal emitida',
-          'Nota fiscal enviada ao cliente'
-        ]
-      }
-    ];
-
-    if (riskData.nivel === 'baixo') {
-      groups.push({
-        title: '4. Verificações adicionais - Vendas de baixo risco',
-        items: [
-          'Cliente recorrente com cadastro ativo na empresa',
-          'Cliente possui histórico de compras anteriores',
-          'Cliente sem histórico de fraude ou chargeback',
-          'Valor da venda dentro do limite definido para baixo risco',
-          'Endereço de entrega já utilizado anteriormente',
-          'Pagamento realizado com cartão do próprio cliente',
-          'Nenhum uso de múltiplos cartões'
-        ]
-      });
-    } else if (riskData.nivel === 'médio') {
-      groups.push({
-        title: '5. Verificações adicionais - Vendas de médio risco',
-        items: [
-          'Cliente realizando primeira compra ou com histórico limitado',
-          'Valor da venda dentro da faixa definida pela empresa para médio risco',
-          'Endereço de entrega ainda não utilizado anteriormente',
-          'Venda realizada exclusivamente por contato digital',
-          'Documento oficial com foto solicitado (RG, CNH ou equivalente)',
-          'Documento do cliente arquivado no dossiê da venda'
-        ]
-      });
-    } else if (riskData.nivel === 'alto') {
-      groups.push({
-        title: '6. Verificações adicionais - Vendas de alto risco',
-        items: [
-          'Valor da venda acima do limite definido pela empresa (se aplicável)',
-          'Cliente novo sem histórico de compras (se aplicável)',
-          'Entrega fora da região habitual de atuação da empresa (se aplicável)',
-          'Pagamento realizado com cartão de terceiro (se aplicável)',
-          'Autorização formal do titular do cartão obtida (quando aplicável)',
-          'Uso de mais de um cartão na transação (se aplicável)',
-          'Retirada da mercadoria ou recebimento por pessoa diferente do comprador (se aplicável)',
-          'Documento oficial com foto solicitado (RG, CNH ou equivalente)',
-          'Selfie do cliente com documento solicitada',
-          'Selfie arquivada no dossiê da venda',
-          'Validação adicional realizada pela área financeira ou gestão comercial'
-        ]
-      });
-    }
-
-    if (tipoRecebimento === 'delivery') {
-      groups.push({
-        title: '7. Comprovação de Entrega (Transportadora)',
-        items: [
-          'Nome de quem recebeu registrado',
-          'Data da entrega registrada',
-          'Assinatura ou confirmação digital registrada',
-          'Número de rastreamento registrado',
-          'Comprovante de entrega da transportadora arquivado'
-        ]
-      });
-    } else {
-      groups.push({
-        title: '7. Comprovação de Entrega (Retirada presencial)',
-        items: [
-          'Nome completo de quem retirou registrado',
-          'Documento de identificação registrado',
-          'Assinatura de retirada registrada',
-          'Data e horário da retirada registrados'
-        ]
-      });
-    }
-
-    groups.push({
-      title: '8. Conferência do dossiê da venda',
-      items: [
-        'Orçamento ou pedido arquivado',
-        'Confirmação da compra registrada na conversa',
-        'Registro da conversa comercial relevante',
-        'Documento de identificação do cliente (quando aplicável)',
-        'Selfie com documento (quando aplicável)',
-        'Comprovante de pagamento',
-        'Nota fiscal',
-        'Comprovante de entrega ou retirada'
-      ]
-    });
-
-    return groups;
-  };
-
-  const checklistGroups = getChecklistGroups();
-  const totalItems = checklistGroups.reduce((acc, g) => acc + g.items.length, 0);
-  const checkedItems = checklistGroups.reduce((acc, g) => acc + g.items.filter(item => checklist[item]).length, 0);
-  const compliancePercent = totalItems > 0 ? Math.round((checkedItems / totalItems) * 100) : 0;
-
-  const handleCardChange = (id, field, value) => {
-    setCards(cards.map(c => c.id === id ? { ...c, [field]: value } : c));
-  };
-
-  const Toggle = ({ label, checked, onChange, icon: Icon, alert }) => (
-    <div 
-      onClick={onChange}
-      className={`flex items-center justify-between p-4 rounded-xl border cursor-pointer transition-all duration-200 ${checked ? 'border-blue-500 bg-blue-50/50 shadow-sm' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
-    >
-      <div className="flex items-center gap-3">
-        {Icon && <Icon className={`w-5 h-5 ${checked ? 'text-blue-600' : 'text-slate-400'}`} />}
-        <span className={`text-sm font-medium ${checked ? 'text-blue-900' : 'text-slate-600'}`}>
-          {label} {alert && checked && <AlertCircle className="w-3.5 h-3.5 inline text-red-500 ml-1" />}
-        </span>
-      </div>
-      <div className={`w-11 h-6 rounded-full flex items-center p-1 transition-colors duration-300 ${checked ? 'bg-blue-600' : 'bg-slate-200'}`}>
-        <div className={`w-4 h-4 bg-white rounded-full shadow-sm transform transition-transform duration-300 ${checked ? 'translate-x-5' : 'translate-x-0'}`} />
-      </div>
-    </div>
-  );
-
-  // --- PASSOS DO WIZARD (ECRÃ) ---
-  const renderStep1 = () => (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-black text-slate-800 flex items-center gap-3 mb-6">
-          <Activity className="w-6 h-6 text-blue-600" />
-          Análise Financeira
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-8">
-          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-100">
-            <label className="flex items-center text-sm font-bold text-slate-600 mb-3">
-              Ticket Médio da Empresa (R$)
-              <Tooltip text="Valor médio das vendas da empresa. Essencial para o cálculo automático de risco (Regra 6.2)." />
-            </label>
-            <input 
-              type="number" value={ticketMedio} onChange={e => setTicketMedio(e.target.value)}
-              className="w-full text-3xl font-light text-slate-800 p-4 bg-white border border-slate-200 rounded-xl outline-none focus:border-blue-500 focus:ring-4 focus:ring-blue-50 transition-all"
-            />
-          </div>
-          <div className="bg-blue-50/50 p-6 rounded-2xl border border-blue-100">
-            <label className="flex items-center text-sm font-bold text-blue-800 mb-3">
-              Valor Total da Venda (R$)
-              <Tooltip text="Se o valor for superior a 2x o Ticket Médio, a venda é reclassificada para Alto Risco (Regra 6.3)." />
-            </label>
-            <input 
-              type="number" value={vendaValor} onChange={e => setVendaValor(e.target.value)} placeholder="0.00"
-              className="w-full text-4xl font-black text-blue-900 p-4 bg-white border-2 border-blue-200 rounded-xl outline-none focus:border-blue-600 focus:ring-4 focus:ring-blue-100 transition-all shadow-sm"
-            />
-          </div>
-        </div>
-      </div>
-
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-black text-slate-800 flex items-center gap-3 mb-6">
-          <FileText className="w-6 h-6 text-blue-600" />
-          Dados da Operação
-        </h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nº Pedido / Orçamento</label>
-            <ValidatedInput value={numPedido} onChange={setNumPedido} placeholder="Ex: PED-1029" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Empresa Emitente (A sua)</label>
-            <ValidatedInput value={nomeEmpresa} onChange={setNomeEmpresa} placeholder="Ex: Carvalho Partners" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Vendedor Responsável</label>
-            <ValidatedInput value={vendedorResponsavel} onChange={setVendedorResponsavel} placeholder="Seu nome" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Nome do Cliente/Comprador</label>
-            <ValidatedInput value={nomeComprador} onChange={setNomeComprador} placeholder="Nome completo" />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">CPF/CNPJ do Comprador</label>
-            <ValidatedInput value={cpfComprador} onChange={setCpfComprador} placeholder="000.000.000-00" formatFn={formatCPF} validateFn={isValidCPF} maxLength={18} />
-          </div>
-          <div>
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Telefone / WhatsApp</label>
-            <ValidatedInput value={telefoneComprador} onChange={setTelefoneComprador} placeholder="(00) 00000-0000" formatFn={formatPhone} validateFn={isValidPhone} maxLength={15} />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Descrição Breve dos Produtos</label>
-            <ValidatedInput value={produtosDescricao} onChange={setProdutosDescricao} placeholder="Ex: 2x Notebooks Dell, 1x Monitor" />
-          </div>
-          <div className="md:col-span-2">
-            <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Parcelamento</label>
-            <select value={parcelas} onChange={e => setParcelas(e.target.value)} className="w-full p-3 bg-white border border-slate-200 rounded-xl text-sm outline-none focus:border-blue-500">
-              <option value="À Vista">À Vista (1x)</option>
-              {[2,3,4,5,6,7,8,9,10,11,12].map(n => <option key={n} value={`${n}x`}>{n}x</option>)}
-            </select>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep2 = () => (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-black text-slate-800 flex items-center gap-3 mb-6">
-          <User className="w-6 h-6 text-blue-600" />
-          Perfil e Histórico do Cliente
-        </h2>
-        
-        <div className="space-y-6">
-          <div className="bg-slate-50 p-5 rounded-2xl border border-slate-200">
-            <label className="flex items-center text-sm font-bold text-slate-800 mb-4">
-              Nº de Compras Anteriores do Cliente
-              <Tooltip text="A política exige mínimo de 2 compras para classificar como 'cliente recorrente' (Baixo Risco). Menos que isso aciona Médio/Alto Risco (Regra 8.1.2.1)." />
-            </label>
-            <div className="flex flex-col sm:flex-row gap-3">
-              {[
-                { val: '0', label: 'Nenhuma (Cliente Novo)' },
-                { val: '1', label: '1 Compra Anterior' },
-                { val: '2+', label: '2 ou Mais (Recorrente)' }
-              ].map(opt => (
-                <button 
-                  key={opt.val} onClick={() => setNumComprasAnteriores(opt.val)}
-                  className={`flex-1 py-3 px-4 rounded-xl text-sm font-bold transition-all border-2 ${numComprasAnteriores === opt.val ? 'bg-blue-600 text-white border-blue-700 shadow-md' : 'bg-white text-slate-600 border-slate-200 hover:border-blue-300'}`}
-                >
-                  {opt.label}
-                </button>
-              ))}
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <div 
-              onClick={() => setHistoricoFraude(!historicoFraude)}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${historicoFraude ? 'bg-red-50 border-red-400' : 'bg-white border-slate-200 hover:border-slate-300'}`}
-            >
-              <div className="flex justify-between items-start mb-2">
-                <span className={`text-sm font-bold ${historicoFraude ? 'text-red-800' : 'text-slate-700'}`}>Possui histórico de fraude ou chargeback?</span>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${historicoFraude ? 'border-red-600 bg-red-600' : 'border-slate-300'}`}>
-                  {historicoFraude && <Check className="w-3 h-3 text-white" />}
-                </div>
-              </div>
-              <p className="text-xs text-slate-500">Se sim, a transação é automaticamente classificada como Alto Risco.</p>
-            </div>
-
-            <div 
-              onClick={() => setProdutoCompativel(!produtoCompativel)}
-              className={`p-5 rounded-2xl border-2 cursor-pointer transition-all ${!produtoCompativel ? 'bg-amber-50 border-amber-400' : 'bg-white border-slate-200 hover:border-slate-300'}`}
-            >
-              <div className="flex justify-between items-start mb-2">
-                <span className={`text-sm font-bold ${!produtoCompativel ? 'text-amber-800' : 'text-slate-700'}`}>Produto é incompatível com o cliente?</span>
-                <div className={`w-5 h-5 rounded-full border-2 flex items-center justify-center ${!produtoCompativel ? 'border-amber-600 bg-amber-600' : 'border-slate-300'}`}>
-                  {!produtoCompativel && <Check className="w-3 h-3 text-white" />}
-                </div>
-              </div>
-              <p className="text-xs text-slate-500">Ex: Pessoa física comprando 10 notebooks industriais. Eleva o nível de risco.</p>
-            </div>
-          </div>
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep3 = () => (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-        <h2 className="text-xl font-black text-slate-800 flex items-center gap-3 mb-6">
-          <Truck className="w-6 h-6 text-blue-600" />
-          Logística e Entrega
-        </h2>
-        
-        <div className="flex bg-slate-100 p-1 rounded-2xl mb-8">
-          <button 
-            onClick={() => setTipoRecebimento('delivery')} 
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${tipoRecebimento === 'delivery' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <Truck className="w-4 h-4" /> Envio / Transportadora
-          </button>
-          <button 
-            onClick={() => setTipoRecebimento('retirada')} 
-            className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all flex items-center justify-center gap-2 ${tipoRecebimento === 'retirada' ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}
-          >
-            <Store className="w-4 h-4" /> Retirada Presencial
-          </button>
-        </div>
-
-        {tipoRecebimento === 'retirada' ? (
-          <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200 animate-in slide-in-from-top-4">
-            <h3 className="text-sm font-bold text-slate-800 mb-4 flex items-center gap-2">Quem fará a retirada? <Tooltip text="A retirada por pessoa diferente do comprador titular eleva o risco para ALTO (Regra 9.1.2.5)." /></h3>
-            <div className="grid grid-cols-2 gap-4">
-              <button onClick={() => setRetiradaPorTerceiro(false)} className={`py-4 rounded-xl border-2 text-sm font-bold transition-all ${!retiradaPorTerceiro ? 'bg-emerald-50 text-emerald-800 border-emerald-400 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>O Próprio Comprador</button>
-              <button onClick={() => setRetiradaPorTerceiro(true)} className={`py-4 rounded-xl border-2 text-sm font-bold transition-all ${retiradaPorTerceiro ? 'bg-red-50 text-red-800 border-red-400 shadow-sm' : 'bg-white text-slate-600 border-slate-200 hover:border-slate-300'}`}>Terceiro Autorizado</button>
-            </div>
-          </div>
-        ) : (
-          <div className="space-y-6 animate-in slide-in-from-top-4">
-            <div className="bg-slate-50 p-6 rounded-2xl border border-slate-200">
-               <h3 className="text-sm font-bold text-slate-800 mb-4">Endereço de Destino</h3>
-               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                 <div>
-                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">CEP</label>
-                   <ValidatedInput value={endereco.cep} onChange={e => setEndereco({...endereco, cep: e})} placeholder="00000-000" formatFn={formatCEP} validateFn={isValidCEP} maxLength={9} />
-                 </div>
-                 <div className="md:col-span-2">
-                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Rua / Avenida</label>
-                   <ValidatedInput value={endereco.rua} onChange={e => setEndereco({...endereco, rua: e})} placeholder="Nome da rua" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Número</label>
-                   <ValidatedInput value={endereco.numero} onChange={e => setEndereco({...endereco, numero: e})} placeholder="Nº" />
-                 </div>
-                 <div className="md:col-span-2">
-                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Bairro</label>
-                   <ValidatedInput value={endereco.bairro} onChange={e => setEndereco({...endereco, bairro: e})} placeholder="Bairro" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Complemento</label>
-                   <ValidatedInput value={endereco.complemento} onChange={e => setEndereco({...endereco, complemento: e})} placeholder="Ex: Apto 12, Bloco B" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">Cidade</label>
-                   <ValidatedInput value={endereco.cidade} onChange={e => setEndereco({...endereco, cidade: e})} placeholder="Cidade" />
-                 </div>
-                 <div>
-                   <label className="block text-xs font-bold text-slate-500 uppercase mb-1">UF</label>
-                   <ValidatedInput value={endereco.estado} onChange={e => setEndereco({...endereco, estado: e})} placeholder="Ex: SP" maxLength={2} />
-                 </div>
-               </div>
-            </div>
-
-            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-               <div onClick={() => setDentroRegiao(!dentroRegiao)} className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${!dentroRegiao ? 'bg-red-50 border-red-300' : 'bg-white border-slate-200'}`}>
-                 <div className="flex items-center gap-2 mb-1">
-                   <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${!dentroRegiao ? 'bg-red-500 border-red-500' : 'border-slate-300'}`}>{!dentroRegiao && <Check className="w-3 h-3 text-white"/>}</div>
-                   <span className={`text-xs font-bold ${!dentroRegiao ? 'text-red-800' : 'text-slate-700'}`}>Fora da Região</span>
-                   <Tooltip text="Entrega fora da região de atuação da empresa eleva o risco para ALTO (Regra 9.1.2.3)." />
-                 </div>
-               </div>
-               <div onClick={() => setMudancaEndereco(!mudancaEndereco)} className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${mudancaEndereco ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'}`}>
-                 <div className="flex items-center gap-2 mb-1">
-                   <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${mudancaEndereco ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>{mudancaEndereco && <Check className="w-3 h-3 text-white"/>}</div>
-                   <span className={`text-xs font-bold ${mudancaEndereco ? 'text-amber-800' : 'text-slate-700'}`}>Mudou o Endereço?</span>
-                   <Tooltip text="Alteração de endereço após o pedido agrava o risco (Regra 6.6.1.3)." />
-                 </div>
-               </div>
-               <div onClick={() => setPedidoUrgencia(!pedidoUrgencia)} className={`p-4 rounded-xl border-2 cursor-pointer transition-all ${pedidoUrgencia ? 'bg-amber-50 border-amber-300' : 'bg-white border-slate-200'}`}>
-                 <div className="flex items-center gap-2 mb-1">
-                   <div className={`w-4 h-4 rounded-full border flex items-center justify-center ${pedidoUrgencia ? 'bg-amber-500 border-amber-500' : 'border-slate-300'}`}>{pedidoUrgencia && <Check className="w-3 h-3 text-white"/>}</div>
-                   <span className={`text-xs font-bold ${pedidoUrgencia ? 'text-amber-800' : 'text-slate-700'}`}>Urgência Incomum?</span>
-                   <Tooltip text="Pedidos com pressão excessiva por rapidez são um forte indicativo de fraude social." />
-                 </div>
-               </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-
-  const renderStep4 = () => (
-    <div className="space-y-8 animate-in fade-in duration-500">
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-        <div className="flex items-center justify-between mb-6">
-          <h2 className="text-xl font-black text-slate-800 flex items-center gap-3">
-            <CreditCard className="w-6 h-6 text-blue-600" />
-            Método de Pagamento
-          </h2>
-        </div>
-
-        <div className="mb-6 p-1 bg-slate-100 rounded-2xl flex max-w-md">
-          <button onClick={() => {setIsMultiplosCartoes(false); setQtdCartoes(1);}} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${!isMultiplosCartoes ? 'bg-white text-slate-800 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}>Apenas 1 Cartão</button>
-          <button onClick={() => setIsMultiplosCartoes(true)} className={`flex-1 py-3 text-sm font-bold rounded-xl transition-all ${isMultiplosCartoes ? 'bg-white text-blue-700 shadow-sm border border-slate-200' : 'text-slate-500 hover:text-slate-700'}`}>Múltiplos Cartões <Tooltip text="Aumenta o risco. Limite máximo de 3 cartões (Regra 11.3)." /></button>
-        </div>
-
-        {isMultiplosCartoes && (
-          <div className="mb-8 p-5 bg-blue-50 border border-blue-100 rounded-2xl flex items-center justify-between animate-in fade-in">
-            <span className="font-bold text-blue-900">Quantos cartões serão utilizados nesta compra?</span>
-            <div className="flex gap-2">
-              <button onClick={() => setQtdCartoes(2)} className={`w-12 h-12 rounded-xl font-black text-lg flex items-center justify-center transition-all ${qtdCartoes === 2 ? 'bg-blue-600 text-white shadow-md' : 'bg-white text-blue-600 border border-blue-200 hover:bg-blue-100'}`}>2</button>
-              <button onClick={() => setQtdCartoes(3)} className={`w-12 h-12 rounded-xl font-black text-lg flex items-center justify-center transition-all ${qtdCartoes === 3 ? 'bg-amber-500 text-white shadow-md' : 'bg-white text-amber-600 border border-amber-200 hover:bg-amber-100'}`}>3</button>
-              <button disabled className="w-12 h-12 rounded-xl font-black text-lg flex items-center justify-center bg-slate-100 text-slate-300 border border-slate-200 cursor-not-allowed" title="Limite de 3 cartões excedido. Política 11.3">4+</button>
-            </div>
-          </div>
-        )}
-
-        {qtdCartoes === 3 && isMultiplosCartoes && (
-          <div className="mb-6 p-4 bg-amber-50 border border-amber-200 rounded-xl flex items-start gap-3 animate-in slide-in-from-top-2">
-            <AlertTriangle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
-            <div>
-              <p className="text-sm font-bold text-amber-900">Alerta de Gestão (Regra 11.3.1.2)</p>
-              <p className="text-xs text-amber-800 mt-1">A utilização de 3 cartões é excepcional e exige bloqueio da transação até a aprovação expressa da diretoria ou gestão financeira.</p>
-            </div>
-          </div>
-        )}
-
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {cards.slice(0, isMultiplosCartoes ? qtdCartoes : 1).map((card, i) => (
-            <div key={card.id} className={`p-6 border-2 rounded-3xl relative transition-all duration-300 ${card.ownerType === 'third' ? 'border-red-200 bg-red-50/30' : 'border-slate-200 bg-white shadow-sm'}`}>
-              <div className={`absolute -top-3 -left-3 w-8 h-8 rounded-full flex items-center justify-center font-black text-xs text-white shadow-sm ${card.ownerType === 'third' ? 'bg-red-500' : 'bg-slate-800'}`}>0{i+1}</div>
-              
-              <p className="text-xs font-black text-slate-400 uppercase tracking-widest mb-4">A quem pertence este cartão?</p>
-              <div className="flex gap-2 mb-5">
-                <button onClick={() => handleCardChange(card.id, 'ownerType', 'self')} className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${card.ownerType === 'self' ? 'bg-emerald-50 text-emerald-700 border-emerald-400' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>Próprio Cliente</button>
-                <button onClick={() => handleCardChange(card.id, 'ownerType', 'third')} className={`flex-1 py-2 rounded-xl text-xs font-bold border-2 transition-all ${card.ownerType === 'third' ? 'bg-red-50 text-red-700 border-red-400' : 'bg-white text-slate-500 border-slate-200 hover:border-slate-300'}`}>Terceiro</button>
-              </div>
-
-              {card.ownerType === 'third' && (
-                <div className="space-y-4 animate-in zoom-in-95">
-                  <div>
-                    <label className="block text-[10px] font-bold text-red-800 uppercase mb-1">Nome do Titular do Cartão</label>
-                    <ValidatedInput value={card.nome} onChange={v => handleCardChange(card.id, 'nome', v)} placeholder="Nome completo" />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-red-800 uppercase mb-1">CPF do Titular</label>
-                    <ValidatedInput value={card.cpf} onChange={v => handleCardChange(card.id, 'cpf', v)} placeholder="000.000.000-00" formatFn={formatCPF} validateFn={isValidCPF} maxLength={18} />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-red-800 uppercase mb-1">Telefone do Titular</label>
-                    <ValidatedInput value={card.telefone} onChange={v => handleCardChange(card.id, 'telefone', v)} placeholder="(00) 00000-0000" formatFn={formatPhone} validateFn={isValidPhone} maxLength={15} />
-                  </div>
-                  <div>
-                    <label className="block text-[10px] font-bold text-red-800 uppercase mb-1">E-mail do Titular (Opcional)</label>
-                    <ValidatedInput value={card.email} onChange={v => handleCardChange(card.id, 'email', v)} placeholder="email@exemplo.com" />
-                  </div>
-                  <p className="text-[10px] font-bold text-red-600 bg-red-100 p-2 rounded-lg flex items-center gap-1.5"><AlertCircle className="w-3 h-3" /> Gerará Anexo I obrigatório no final.</p>
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep5 = () => (
-    <div className="space-y-8 animate-in fade-in duration-500 print:hidden">
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200 flex flex-col items-center justify-center text-center">
-        <h2 className="text-sm font-black text-slate-400 uppercase tracking-widest mb-6">Resultado do Motor de Risco</h2>
-        
-        <div className={`w-48 h-48 rounded-full border-8 flex items-center justify-center flex-col shadow-inner mb-8 transition-colors duration-1000 ${riskData.nivel === 'baixo' ? 'border-emerald-500 bg-emerald-50' : riskData.nivel === 'médio' ? 'border-amber-500 bg-amber-50' : 'border-red-500 bg-red-50'}`}>
-          <Shield className={`w-10 h-10 mb-2 ${riskData.nivel === 'baixo' ? 'text-emerald-500' : riskData.nivel === 'médio' ? 'text-amber-500' : 'text-red-500'}`} />
-          <span className={`text-4xl font-black uppercase tracking-tight ${riskData.nivel === 'baixo' ? 'text-emerald-700' : riskData.nivel === 'médio' ? 'text-amber-700' : 'text-red-700'}`}>{riskData.nivel}</span>
-          <span className="text-[10px] font-bold text-slate-500 uppercase mt-1">Risco Final</span>
-        </div>
-
-        <div className="w-full max-w-2xl bg-slate-50 p-6 rounded-2xl border border-slate-200 text-left">
-           <h3 className="text-sm font-bold text-slate-800 mb-4 border-b border-slate-200 pb-2">Fundamentação Baseada na Política Interna:</h3>
-           <ul className="space-y-3">
-             {riskData.rules.map((rule, idx) => (
-               <li key={idx} className="flex items-start gap-3 text-sm font-medium text-slate-700">
-                 <CheckCircle className={`w-5 h-5 flex-shrink-0 ${riskData.nivel === 'baixo' ? 'text-emerald-500' : riskData.nivel === 'médio' ? 'text-amber-500' : 'text-red-500'}`} />
-                 {rule}
-               </li>
-             ))}
-           </ul>
-        </div>
-      </div>
-
-      <div className="bg-white p-8 rounded-3xl shadow-sm border border-slate-200">
-        <h2 className="text-lg font-black text-slate-800 mb-6 flex items-center gap-2"><FileText className="w-5 h-5 text-blue-600" /> Resumo dos Dados Preenchidos</h2>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-x-12 gap-y-4 text-sm">
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">Valor da Venda:</span><span className="font-bold">R$ {vendaValor || '0'}</span></div>
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">Ticket Médio Configurado:</span><span className="font-bold">R$ {ticketMedio || '0'}</span></div>
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">Cliente / Comprador:</span><span className="font-bold">{nomeComprador || 'Não informado'}</span></div>
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">CPF Comprador:</span><span className="font-bold">{cpfComprador || 'Não informado'}</span></div>
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">Nº Compras Anteriores:</span><span className="font-bold">{numComprasAnteriores}</span></div>
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">Logística:</span><span className="font-bold uppercase text-xs bg-slate-100 px-2 py-1 rounded">{tipoRecebimento}</span></div>
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">Qtd. de Cartões Usados:</span><span className="font-bold">{qtdCartoes}</span></div>
-          <div className="flex justify-between border-b border-slate-100 py-2"><span className="text-slate-500">Contém Cartão de Terceiro?</span><span className="font-bold">{cards.some(c=>c.ownerType === 'third') ? 'Sim' : 'Não'}</span></div>
-        </div>
-        <div className="mt-8 p-4 bg-blue-50 text-blue-800 text-sm font-medium rounded-xl flex items-center justify-center gap-3">
-           <Info className="w-5 h-5" /> Confirme os dados. O próximo passo ativará o Checklist Interativo e a Geração de PDFs.
-        </div>
-      </div>
-    </div>
-  );
-
-  const renderStep6 = () => (
-    <div className="space-y-8 animate-in fade-in duration-500 print:hidden">
-      
-      {/* 1. INTERACTIVE CHECKLIST UI */}
-      <div className="bg-white p-8 md:p-10 rounded-3xl shadow-sm border border-slate-200">
-         <div className="flex flex-col md:flex-row items-center justify-between gap-6 mb-8">
-           <div className="flex-1">
-             <h2 className="text-2xl font-black text-slate-800 flex items-center gap-3 mb-2">
-               <CheckSquare className="w-8 h-8 text-blue-600" /> Validação da Venda (Anexo II)
-             </h2>
-             <p className="text-slate-500 text-sm">Realize a marcação dos procedimentos. Apenas vendas a 100% devem ser expedidas.</p>
-           </div>
-           <div className="flex flex-col items-end bg-slate-50 p-4 rounded-xl border border-slate-200">
-             <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest mb-1">Índice de Conformidade</span>
-             <div className="flex items-center gap-4">
-               <div className="w-32 h-2 bg-slate-200 rounded-full overflow-hidden">
-                  <div className={`h-full transition-all duration-500 ${compliancePercent === 100 ? 'bg-emerald-500' : 'bg-blue-500'}`} style={{ width: `${compliancePercent}%` }} />
-               </div>
-               <span className={`text-2xl font-black ${compliancePercent === 100 ? 'text-emerald-600' : 'text-blue-600'}`}>{compliancePercent}%</span>
-             </div>
-           </div>
-         </div>
-
-         <div className="space-y-8">
-            {checklistGroups.map((group, gIdx) => (
-              <div key={gIdx}>
-                <h3 className="text-sm font-bold text-slate-800 mb-4 uppercase tracking-wider border-b border-slate-200 pb-2">{group.title}</h3>
-                <ul className="space-y-2">
-                  {group.items.map((item) => {
-                    const isChecked = checklist[item];
-                    return (
-                      <li 
-                        key={item} 
-                        onClick={() => setChecklist(p => ({...p, [item]: !p[item]}))}
-                        className={`flex items-start gap-4 p-4 rounded-xl cursor-pointer transition-all border-2 ${isChecked ? 'bg-emerald-50 border-emerald-500' : 'bg-slate-50 border-slate-200 hover:border-blue-400'}`}
-                      >
-                        <div className={`mt-0.5 w-6 h-6 rounded-md flex-shrink-0 flex items-center justify-center transition-colors ${isChecked ? 'bg-emerald-500 text-white' : 'bg-white border-2 border-slate-300'}`}>
-                           {isChecked && <Check className="w-4 h-4" />}
-                        </div>
-                        <span className={`text-sm font-medium leading-snug ${isChecked ? 'text-emerald-900' : 'text-slate-600'}`}>{item}</span>
-                      </li>
-                    )
-                  })}
-                </ul>
-              </div>
-            ))}
-         </div>
-      </div>
-
-      {/* 2. PRINT ACTIONS */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col justify-between">
-          <div>
-            <h3 className="text-lg font-black text-slate-800 mb-2">Checklist Anexo II</h3>
-            <p className="text-sm text-slate-500 mb-6">Imprima o checklist com as respostas marcadas acima para arquivo no dossiê físico ou digital.</p>
-          </div>
-          <button onClick={() => handlePrint('anexo2')} className="w-full py-4 bg-slate-900 text-white rounded-xl font-bold hover:bg-slate-800 transition-all flex items-center justify-center gap-3 shadow-lg">
-            <Printer className="w-5 h-5" /> Imprimir Anexo II
-          </button>
-        </div>
-
-        {cards.some(c => c.ownerType === 'third') ? (
-          <div className="bg-white p-6 rounded-3xl shadow-sm border border-slate-200 flex flex-col justify-between">
-            <div>
-              <h3 className="text-lg font-black text-slate-800 mb-2 flex items-center gap-2"><AlertTriangle className="w-5 h-5 text-amber-500" /> Termo Anexo I</h3>
-              <p className="text-sm text-slate-500 mb-6">Foi detetado o uso de Cartão de Terceiro. O Termo de Autorização preenchido com os dados do passo 4 deve ser assinado.</p>
-            </div>
-            <button onClick={() => handlePrint('anexo1')} className="w-full py-4 bg-amber-500 text-white rounded-xl font-bold hover:bg-amber-600 transition-all flex items-center justify-center gap-3 shadow-lg shadow-amber-200">
-              <Printer className="w-5 h-5" /> Imprimir Anexo I (Termos)
-            </button>
-          </div>
-        ) : (
-          <div className="bg-slate-50 p-6 rounded-3xl border border-slate-200 flex flex-col items-center justify-center text-center opacity-70">
-            <CheckCircle2 className="w-8 h-8 text-slate-400 mb-2" />
-            <h3 className="text-sm font-black text-slate-600">Anexo I Não Requerido</h3>
-            <p className="text-xs text-slate-500 mt-1">Nenhum cartão de terceiro foi utilizado nesta transação.</p>
-          </div>
-        )}
-      </div>
-
-      {/* 3. GUIA DO DOSSIÊ OFICIAL (Seção 13.5.1) */}
-      <div className="bg-slate-900 p-8 rounded-3xl shadow-xl text-white relative overflow-hidden">
-        <Shield className="absolute -right-10 -bottom-10 w-48 h-48 text-white/5 rotate-12" />
-        <h2 className="text-2xl font-black flex items-center gap-3 mb-6 relative z-10">
-          <Folder className="w-8 h-8 text-blue-400" /> Montagem do Dossiê Obrigatório (Regra 13.5.1)
-        </h2>
-        <div className="bg-black/30 p-6 rounded-2xl border border-white/10 mb-8 relative z-10 backdrop-blur-sm">
-          <p className="text-[10px] font-bold text-blue-300 uppercase tracking-widest mb-2">Crie a pasta principal no seu servidor com o NOME EXATO abaixo:</p>
-          <div className="bg-white/10 p-3 rounded-lg border border-white/20 font-mono tracking-tight text-lg break-all">
-            {dataVenda.replace(/-/g, '_')}-{numPedido || 'NUM_PEDIDO'}-{nomeComprador ? nomeComprador.toUpperCase().replace(/\s/g, '_') : 'NOME_DO_CLIENTE'}
-          </div>
-        </div>
-        
-        <h3 className="text-sm font-bold text-slate-300 mb-5 relative z-10 uppercase tracking-wider">Documentos obrigatórios dentro da pasta:</h3>
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4 relative z-10">
-          {[
-            { id: '01', title: 'IDENTIFICACAO CLIENTE', desc: 'Foto legível do RG ou CNH e CPF/CNPJ do comprador.' },
-            { id: '02', title: 'NEGOCIACAO E CONVERSAS', desc: 'Prints das tratativas no WhatsApp ou exportação de e-mails.' },
-            { id: '03', title: 'CONFIRMACAO DA COMPRA', desc: 'Print da mensagem do cliente dizendo "De acordo" com o valor/pedido.' },
-            { id: '04', title: 'COMPROVANTE PAGAMENTO', desc: 'Recibo da transação aprovada extraído da plataforma (com ID da transação).' },
-            { id: '05', title: 'DOCUMENTOS CARTAO TERCEIRO', desc: 'O "Anexo I" assinado pelo titular E a Selfie do titular com o documento.', cond: true },
-            { id: '06', title: 'DOCUMENTOS MULTIPLOS CARTOES', desc: 'Autorizações de cada titular quando há divisão em mais de 1 cartão.', cond: true },
-            { id: '07', title: 'ENTREGA OU RETIRADA', desc: 'Canhoto da Nota Fiscal assinado ou protocolo de rastreio da transportadora.' },
-            { id: '08', title: 'OBSERVACOES E COMPLEMENTOS', desc: 'Aprovações excepcionais da Diretoria/Financeiro (quando o risco exigir).', cond: true },
-          ].map(f => (
-            <div key={f.id} className="p-4 bg-white/5 border border-white/10 rounded-xl flex items-start gap-4 hover:bg-white/10 transition-colors">
-               <span className="bg-blue-500 text-white text-xs font-black px-2 py-1 rounded w-max shadow-sm">{f.id}</span>
-               <div>
-                 <p className="text-sm font-bold text-white mb-1">{f.title} {f.cond && <span className="text-[9px] bg-amber-500/20 text-amber-300 border border-amber-500/30 px-1.5 py-0.5 rounded ml-2 uppercase">Se aplicável</span>}</p>
-                 <p className="text-xs text-slate-400 leading-relaxed">{f.desc}</p>
-               </div>
-            </div>
-          ))}
-        </div>
-      </div>
-      
-      {/* 4. AVALIAR NOVA VENDA (RESET) */}
-      <div className="flex justify-center mt-12 mb-4">
-         <button 
-           onClick={handleReset} 
-           className="px-10 py-5 bg-indigo-50 text-indigo-700 rounded-2xl font-black text-lg hover:bg-indigo-100 hover:shadow-lg transition-all flex items-center justify-center gap-3 border-2 border-indigo-100 transform hover:-translate-y-1"
-         >
-           <Activity className="w-6 h-6" /> Avaliar Nova Venda (Zerar Dados)
-         </button>
-      </div>
-    </div>
-  );
-
-  const renderWizardContent = () => {
-    switch(currentStep) {
-      case 1: return renderStep1();
-      case 2: return renderStep2();
-      case 3: return renderStep3();
-      case 4: return renderStep4();
-      case 5: return renderStep5();
-      case 6: return renderStep6();
-      default: return renderStep1();
-    }
-  };
-
-  // --- VIEWS DE IMPRESSÃO PURA (RENDERIZADAS APENAS NO MODO PRINT) ---
-  const PrintAnexo1 = () => {
-    const thirdPartyCards = cards.slice(0, isMultiplosCartoes ? qtdCartoes : 1).filter(c => c.ownerType === 'third');
-    return (
-      <div className="block w-full">
-        {thirdPartyCards.map((card, idx) => (
-          <div key={card.id} style={{ pageBreakAfter: 'always', breakAfter: 'page' }} className="block w-full bg-white font-serif text-[11pt] text-justify text-black leading-relaxed mx-auto max-w-[800px] print:w-full print:max-w-none print:shadow-none print:border-none print:p-0 print:overflow-visible mb-16 border-b-4 border-dashed border-gray-300 pb-16 print:border-none print:pb-0 print:mb-0">
-            <div className="text-center font-bold mb-10 pb-6 border-b-2 border-black">
-              <h1 className="text-lg uppercase tracking-wide mb-2">ANEXO I</h1>
-              <h2 className="text-base uppercase tracking-wide">TERMO DE AUTORIZAÇÃO PARA UTILIZAÇÃO DE CARTÃO DE TERCEIRO</h2>
-              <p className="text-sm font-normal mt-4">Política de Vendas Remotas por Link de Pagamento e Prevenção de Fraudes</p>
-            </div>
-            
-            <p className="mb-6 indent-8">Este documento tem por finalidade registrar a autorização expressa do titular do cartão de crédito para utilização do seu cartão em transação realizada junto à <strong>{nomeEmpresa || '[NOME DA EMPRESA]'}</strong>, conforme previsto na Política de Vendas Remotas por Link de Pagamento e Prevenção de Fraudes da empresa.</p>
-
-            <p className="mb-10 indent-8">Este termo deve ser utilizado sempre que o pagamento de uma venda realizada por link de pagamento ocorrer com cartão de crédito cujo titular seja diferente do comprador.</p>
-
-            <div className="space-y-8 pl-4">
-              <div>
-                <h3 className="font-bold text-sm mb-3 border-b border-gray-300 pb-1">1. Identificação do Titular do Cartão</h3>
-                <div className="pl-4 space-y-2">
-                  <p><span className="font-semibold">Nome completo:</span> {card.nome || '_________________________________________________________'}</p>
-                  <p><span className="font-semibold">CPF:</span> {card.cpf || '____________________'}</p>
-                  <p><span className="font-semibold">Telefone:</span> {card.telefone || '____________________'}</p>
-                  <p><span className="font-semibold">E-mail:</span> {card.email || '________________________________________'}</p>
-                </div>
-              </div>
-              
-              <div>
-                <h3 className="font-bold text-sm mb-3 border-b border-gray-300 pb-1">2. Identificação do Comprador</h3>
-                <div className="pl-4 space-y-2">
-                  <p><span className="font-semibold">Nome completo:</span> {nomeComprador || '_________________________________________________________'}</p>
-                  <p><span className="font-semibold">CPF ou CNPJ:</span> {cpfComprador || '____________________'}</p>
-                  <p><span className="font-semibold">Telefone:</span> {telefoneComprador || '____________________'}</p>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="font-bold text-sm mb-3 border-b border-gray-300 pb-1">3. Identificação da Compra</h3>
-                <div className="pl-4 space-y-2">
-                  <p><span className="font-semibold">Número do pedido ou orçamento:</span> {numPedido || '____________________'}</p>
-                  <p><span className="font-semibold">Descrição resumida dos produtos:</span> {produtosDescricao || '____________________________________________________'}</p>
-                  <p><span className="font-semibold">Valor total da compra:</span> R$ {vendaValor ? Number(vendaValor).toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '____________________'}</p>
-                  <p><span className="font-semibold">Quantidade de parcelas:</span> {parcelas || '______'}</p>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="font-bold text-sm mb-3 border-b border-gray-300 pb-1">4. Endereço de Entrega da Mercadoria</h3>
-                <div className="pl-4 space-y-2">
-                  <p><span className="font-semibold">Rua / Avenida:</span> {endereco.rua || '_____________________________________________________'}</p>
-                  <p><span className="font-semibold">Número:</span> {endereco.numero || '__________'} &nbsp;&nbsp; <span className="font-semibold">Bairro:</span> {endereco.bairro || '______________________________'}</p>
-                  <p><span className="font-semibold">Complemento:</span> {endereco.complemento || '________________________________________'}</p>
-                  <p><span className="font-semibold">Cidade:</span> {endereco.cidade || '____________________'} &nbsp;&nbsp; <span className="font-semibold">Estado:</span> {endereco.estado || '_____'} &nbsp;&nbsp; <span className="font-semibold">CEP:</span> {endereco.cep || '___________'}</p>
-                </div>
-              </div>
-
-              <div>
-                <h3 className="font-bold text-sm mb-3 border-b border-gray-300 pb-1">5. Declaração de Autorização do Titular do Cartão</h3>
-                <p className="mb-4 indent-8">Eu, <strong>{card.nome || '_________________________________________'}</strong>, CPF <strong>{card.cpf || '____________________'}</strong>, na qualidade de titular do cartão de crédito utilizado nesta operação, autorizo expressamente a utilização do meu cartão para pagamento da compra identificada neste documento, realizada junto à <strong>{nomeEmpresa || '[NOME DA EMPRESA]'}</strong>.</p>
-                
-                <p className="font-bold mb-3">Declaro que:</p>
-                <ol className="list-[upper-roman] pl-10 space-y-3">
-                  <li>tenho conhecimento da compra realizada, do valor total da transação e das condições de pagamento, incluindo o parcelamento quando aplicável;</li>
-                  <li>autorizo voluntariamente a utilização do meu cartão de crédito para pagamento do pedido nº <strong>{numPedido || '__________'}</strong> no valor total de <strong>R$ {vendaValor ? Number(vendaValor).toLocaleString('pt-BR', {minimumFractionDigits: 2}) : '__________'}</strong>;</li>
-                  <li>tenho ciência de que a transação será realizada por meio de link de pagamento enviado pela empresa, em ambiente digital seguro;</li>
-                  <li>autorizo expressamente a realização desta cobrança no cartão informado para esta operação específica;</li>
-                  <li>confirmo que as informações registradas neste documento correspondem à operação realizada.</li>
-                </ol>
-              </div>
-
-              <div className="break-inside-avoid">
-                <h3 className="font-bold text-sm mb-3 border-b border-gray-300 pb-1">6. Declaração do Comprador</h3>
-                <p className="indent-8">Eu, <strong>{nomeComprador || '_________________________________________'}</strong>, comprador identificado neste documento, declaro que possuo autorização do titular do cartão para utilização do meio de pagamento nesta transação e que as informações registradas correspondem à compra realizada.</p>
-              </div>
-
-              <div className="break-inside-avoid">
-                <h3 className="font-bold text-sm mb-3 border-b border-gray-300 pb-1">7. Data da Autorização</h3>
-                <p className="pl-4">Data da autorização: <strong>{new Date().toLocaleDateString('pt-BR')}</strong></p>
-              </div>
-
-              <div className="pt-12 break-inside-avoid">
-                <h3 className="font-bold text-sm mb-12 text-center">8. Assinaturas ou Aceites Eletrônicos</h3>
-                <div className="flex flex-col gap-16 px-10">
-                  <div>
-                    <div className="border-t border-black w-full pt-2">
-                      <p className="font-bold">Titular do Cartão: {card.nome || '_________________________________________'}</p>
-                      <p className="text-xs text-gray-500 mt-1">Assinatura digital ou aceite eletrônico</p>
-                    </div>
-                  </div>
-                  <div>
-                    <div className="border-t border-black w-full pt-2">
-                      <p className="font-bold">Comprador: {nomeComprador || '_________________________________________'}</p>
-                      <p className="text-xs text-gray-500 mt-1">Assinatura digital ou aceite eletrônico</p>
-                    </div>
-                  </div>
-                </div>
-              </div>
-
-            </div>
-          </div>
-        ))}
-      </div>
-    );
-  };
-
-  const PrintAnexo2 = () => {
-    return (
-      <div className="w-full bg-white font-serif text-[11pt] text-black block">
-        <div className="text-center mb-10 border-b-2 border-black pb-4">
-          <h1 className="text-xl font-bold uppercase tracking-widest mb-2">ANEXO II - CHECKLIST DE CONFIRMAÇÃO E VALIDAÇÃO DA VENDA</h1>
-          <p className="text-sm">Política de Vendas Remotas por Link de Pagamento e Prevenção de Fraudes</p>
-        </div>
-
-        <div className="mb-8">
-          <h3 className="text-sm font-bold bg-gray-100 p-2 border border-black mb-4 uppercase">1. Identificação da venda</h3>
-          <div className="grid grid-cols-2 gap-x-8 gap-y-4 text-sm pl-2">
-             <div className="flex items-center gap-2"><span className="font-bold whitespace-nowrap">Nº Pedido/Orçamento:</span> <span className="border-b border-black flex-1">{numPedido}</span></div>
-             <div className="flex items-center gap-2"><span className="font-bold whitespace-nowrap">Data da venda:</span> <span className="border-b border-black flex-1">{dataVenda.split('-').reverse().join('/')}</span></div>
-             <div className="flex items-center gap-2"><span className="font-bold whitespace-nowrap">Vendedor responsável:</span> <span className="border-b border-black flex-1">{vendedorResponsavel}</span></div>
-             <div className="flex items-center gap-2"><span className="font-bold whitespace-nowrap">Cliente:</span> <span className="border-b border-black flex-1">{nomeComprador}</span></div>
-             <div className="flex items-center gap-2"><span className="font-bold whitespace-nowrap">Cidade de entrega:</span> <span className="border-b border-black flex-1">{endereco.cidade}</span></div>
-             <div className="flex items-center gap-2"><span className="font-bold whitespace-nowrap">Valor Total: R$</span> <span className="border-b border-black flex-1">{vendaValor}</span></div>
-          </div>
-        </div>
-
-        <div className="mb-8">
-           <h3 className="text-sm font-bold bg-gray-100 p-2 border border-black mb-4 uppercase">2. Classificação de Risco da Venda</h3>
-           <div className="flex gap-10 pl-4 text-sm">
-             <label className="flex items-center gap-2 font-bold">{riskData.nivel === 'baixo' ? '[ X ]' : '[   ]'} Baixo risco</label>
-             <label className="flex items-center gap-2 font-bold">{riskData.nivel === 'médio' ? '[ X ]' : '[   ]'} Médio risco</label>
-             <label className="flex items-center gap-2 font-bold">{riskData.nivel === 'alto' ? '[ X ]' : '[   ]'} Alto risco</label>
-           </div>
-        </div>
-
-        <div className="space-y-6">
-          {checklistGroups.map((group, gIdx) => (
-            <div key={gIdx} className="break-inside-avoid">
-              <h3 className="text-sm font-bold bg-gray-100 p-2 border border-black uppercase">{group.title}</h3>
-              <table className="w-full border-collapse text-sm">
-                <thead>
-                  <tr>
-                    <th className="border border-black p-2 text-left w-auto font-bold bg-gray-50">Verificação / Documento</th>
-                    <th className="border border-black p-2 text-center w-16 font-bold bg-gray-50">OK</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {group.items.map((item, itemIdx) => {
-                    const isChecked = checklist[item];
-                    return (
-                      <tr key={itemIdx}>
-                        <td className="border border-black p-2 text-justify">{item}</td>
-                        <td className="border border-black p-2 text-center align-middle font-bold text-base">
-                           {isChecked ? 'X' : ''}
-                        </td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          ))}
-        </div>
-
-        <div className="mt-12 break-inside-avoid">
-          <h3 className="text-sm font-bold bg-gray-100 p-2 border border-black mb-4 uppercase">9. Declaração do responsável</h3>
-          <p className="text-sm text-justify mb-8 px-2 leading-relaxed">Declaro que todos os procedimentos previstos na Política de Vendas Remotas por Link de Pagamento e Prevenção de Fraudes da empresa foram cumpridos e que a documentação da venda foi devidamente arquivada no dossiê correspondente.</p>
-          
-          <div className="flex flex-col gap-8 px-2 text-sm">
-             <div className="flex items-end gap-2">
-               <span className="font-bold w-48">Nome do responsável:</span>
-               <div className="border-b border-black flex-1 text-base">{vendedorResponsavel}</div>
-             </div>
-             <div className="flex items-end gap-2 mt-2">
-               <span className="font-bold w-48">Assinatura:</span>
-               <div className="border-b border-black flex-1 h-6"></div>
-             </div>
-             <div className="flex items-end gap-2 mt-2 w-1/2">
-               <span className="font-bold w-48">Data da Validação:</span>
-               <div className="border-b border-black flex-1 text-base">{new Date().toLocaleDateString('pt-BR')}</div>
-             </div>
-          </div>
-        </div>
-      </div>
-    );
-  };
-
-  const steps = [
-    { num: 1, title: 'Dados Iniciais', icon: Activity },
-    { num: 2, title: 'Perfil', icon: User },
-    { num: 3, title: 'Logística', icon: Truck },
-    { num: 4, title: 'Pagamento', icon: CreditCard },
-    { num: 5, title: 'Risco', icon: Shield },
-    { num: 6, title: 'Checklist/Print', icon: Printer },
-  ];
-
-  return (
-    <div className={`min-h-screen bg-[#F8FAFC] font-sans text-slate-900 selection:bg-blue-200 selection:text-blue-900 ${printMode !== '' ? 'print-mode-active bg-white' : ''}`}>
-      
-      {/* SCREEN CONTENT (ESCONDIDO QUANDO VAI IMPRIMIR) */}
-      <div className={`flex-col min-h-screen ${printMode !== '' ? 'hidden print:hidden' : 'flex'}`}>
-        {/* Header Corporativo */}
-        <header className="bg-white border-b border-slate-200 sticky top-0 z-50 shadow-sm">
-          <div className="max-w-5xl mx-auto px-4 h-20 flex items-center justify-between">
-            <div className="flex items-center gap-4">
-              <div className="bg-blue-600 w-12 h-12 rounded-2xl flex items-center justify-center shadow-lg shadow-blue-200">
-                <Shield className="w-6 h-6 text-white" />
-              </div>
-              <div>
-                <h1 className="text-2xl font-black tracking-tight text-slate-800">Venda Remota Segura</h1>
-                <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-0.5">Prevenção de Fraudes & Compliance</p>
-              </div>
-            </div>
-            <div className="hidden md:flex items-center gap-3">
-               <div className="flex flex-col items-end">
-                  <span className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mb-1">Status Policy</span>
-                  <span className="inline-flex items-center gap-2 px-3 py-1 rounded-lg bg-emerald-50 text-emerald-700 text-xs font-bold border border-emerald-100 shadow-sm">
-                    <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse"></span> Ativo
-                  </span>
-               </div>
-            </div>
-          </div>
-        </header>
-
-        {/* Main Container */}
-        <main className="flex-grow w-full max-w-5xl mx-auto px-4 py-8">
-          
-          {/* Wizard Progress Bar */}
-          <div className="mb-10 bg-white p-4 rounded-3xl shadow-sm border border-slate-200">
-             <div className="flex items-center justify-between relative">
-               <div className="absolute left-0 top-1/2 -translate-y-1/2 w-full h-1 bg-slate-100 rounded-full z-0"></div>
-               <div className="absolute left-0 top-1/2 -translate-y-1/2 h-1 bg-blue-500 rounded-full z-0 transition-all duration-500" style={{ width: `${((currentStep - 1) / (steps.length - 1)) * 100}%` }}></div>
-               
-               {steps.map(step => (
-                 <div key={step.num} onClick={() => setCurrentStep(step.num)} className={`relative z-10 flex flex-col items-center gap-2 cursor-pointer transition-all ${currentStep === step.num ? 'scale-110' : 'opacity-60 hover:opacity-100'}`}>
-                   <div className={`w-10 h-10 rounded-2xl flex items-center justify-center font-black transition-colors ${currentStep === step.num ? 'bg-blue-600 text-white shadow-lg shadow-blue-200' : currentStep > step.num ? 'bg-blue-500 text-white' : 'bg-white text-slate-400 border-2 border-slate-200'}`}>
-                     {currentStep > step.num ? <Check className="w-5 h-5" /> : <step.icon className="w-5 h-5" />}
-                   </div>
-                   <span className={`text-[10px] font-bold uppercase tracking-widest hidden sm:block ${currentStep === step.num ? 'text-blue-700' : 'text-slate-400'}`}>{step.title}</span>
-                 </div>
-               ))}
-             </div>
-          </div>
-
-          {/* Wizard Content Area */}
-          <div className="min-h-[50vh]">
-            {renderWizardContent()}
-          </div>
-
-          {/* Wizard Navigation Buttons */}
-          <div className="mt-10 flex justify-between items-center border-t border-slate-200 pt-6">
-             <button 
-               disabled={currentStep === 1} 
-               onClick={() => setCurrentStep(prev => Math.max(1, prev - 1))}
-               className={`px-8 py-4 rounded-xl font-bold flex items-center gap-3 transition-all ${currentStep === 1 ? 'opacity-0 cursor-default' : 'bg-white border-2 border-slate-200 text-slate-600 hover:bg-slate-50 hover:border-slate-300'}`}
-             >
-               <ChevronLeft className="w-5 h-5" /> Voltar
-             </button>
-
-             {currentStep < steps.length && (
-               <button 
-                 onClick={() => setCurrentStep(prev => Math.min(steps.length, prev + 1))}
-                 className="px-10 py-4 bg-blue-600 text-white rounded-xl font-black flex items-center gap-3 hover:bg-blue-700 transition-all shadow-lg shadow-blue-200 transform hover:scale-105"
-               >
-                 Próximo Passo <ChevronRight className="w-5 h-5" />
-               </button>
-             )}
-          </div>
-        </main>
-
-        {/* Footer Sara Carvalho */}
-        <footer className="bg-white border-t border-slate-200 py-8">
-          <div className="max-w-5xl mx-auto px-4 flex flex-col md:flex-row items-center justify-between gap-6">
-            <div className="flex items-center gap-4">
-               <div className="w-12 h-12 bg-slate-900 rounded-xl flex items-center justify-center text-white font-serif font-black text-xl shadow-md">
-                 SC
-               </div>
-               <div>
-                 <p className="text-sm font-bold text-slate-900">Sara Carvalho <span className="text-slate-300 font-normal mx-1.5">|</span> <span className="font-medium text-slate-600">Carvalho Partners</span></p>
-                 <p className="text-[10px] font-bold text-slate-400 uppercase tracking-widest mt-1">Consultoria Especializada em Gestão de Risco</p>
-               </div>
-            </div>
-            
-            <div className="flex flex-col sm:flex-row items-center gap-5">
-               <a href="mailto:saracarvalho@carvalhopartners.com" className="flex items-center gap-2.5 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
-                 <FileText className="w-4 h-4" /> saracarvalho@carvalhopartners.com
-               </a>
-               <a href="tel:+5562991438373" className="flex items-center gap-2.5 text-xs font-bold text-slate-500 hover:text-blue-600 transition-colors bg-slate-50 px-4 py-2 rounded-lg border border-slate-100">
-                 <User className="w-4 h-4" /> (62) 99143-8373
-               </a>
-            </div>
-          </div>
-        </footer>
-      </div>
-
-      {/* PRINT CONTAINER (ESCONDIDO NA TELA, VISÍVEL NA IMPRESSÃO) */}
-      <div className={`w-full bg-white text-black p-0 m-0 ${printMode !== '' ? 'block print:block' : 'hidden print:hidden'}`}>
-        <div className="print:hidden w-full bg-slate-900 text-white p-4 flex items-center justify-between sticky top-0 z-50">
-           <span className="font-bold flex items-center gap-2"><Printer className="w-5 h-5"/> A pré-visualizar impressão. Feche a janela de impressão ou clique em Voltar.</span>
-           <button onClick={() => setPrintMode('')} className="bg-red-500 hover:bg-red-600 text-white px-6 py-2 rounded-lg font-bold transition-colors">Voltar ao Sistema</button>
-        </div>
-        <div className="pt-8 print:pt-0 block">
-          {printMode === 'anexo1' && <PrintAnexo1 />}
-          {printMode === 'anexo2' && <PrintAnexo2 />}
-        </div>
-      </div>
-
-      {/* CSS ISOLADO PARA MODO IMPRESSÃO */}
-      <style>{`
-        @media print {
-          @page { margin: 15mm; size: A4; }
-          body, html { 
-            background: white !important; 
-            margin: 0 !important;
-            padding: 0 !important;
-            -webkit-print-color-adjust: exact; 
-            print-color-adjust: exact;
-          }
-          .page-break-after-always { page-break-after: always; break-after: page; }
-          .break-inside-avoid { page-break-inside: avoid; break-inside: avoid; }
-          
-          /* Formatação específica para inputs na impressão */
-          input { border: none !important; background: transparent !important; padding: 0 !important; font-family: serif; color: black !important; }
-          input[type="text"], input[type="number"], input[type="date"], input[type="email"] { border-bottom: 1px solid black !important; border-radius: 0 !important; }
-        }
-      `}</style>
-    </div>
-  );
-};
-
-export default App;
+<!DOCTYPE html>
+
+<html lang="pt-BR">
+
+<head>
+<meta charset="UTF-8">
+<title>Sistema Antifraude</title>
+
+<script src="https://unpkg.com/react@18/umd/react.development.js"></script>
+
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.development.js"></script>
+
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+
+<script src="https://cdn.tailwindcss.com"></script>
+
+</head>
+
+<body class="bg-slate-100">
+
+<div id="root"></div>
+
+<script type="text/babel">
+
+const { useState, useEffect } = React;
+
+function App(){
+
+const [nome,setNome] = useState("")
+const [cpf,setCpf] = useState("")
+const [valor,setValor] = useState("")
+const [ticket,setTicket] = useState(1200)
+
+function calcularRisco(){
+
+const venda = Number(valor)
+
+if(!venda) return "—"
+
+if(venda > ticket*2){
+return "ALTO"
+}
+
+if(venda > ticket){
+return "MÉDIO"
+}
+
+return "BAIXO"
+
+}
+
+const risco = calcularRisco()
+
+return (
+
+<div className="max-w-3xl mx-auto mt-16 bg-white p-10 rounded-2xl shadow">
+
+<h1 className="text-3xl font-bold mb-8">
+Sistema Antifraude
+</h1>
+
+<div className="space-y-6">
+
+<div>
+<label className="block text-sm font-bold mb-1">
+Nome do Cliente
+</label>
+
+<input
+className="w-full border p-3 rounded"
+value={nome}
+onChange={e=>setNome(e.target.value)}
+/>
+
+</div>
+
+
+<div>
+<label className="block text-sm font-bold mb-1">
+CPF
+</label>
+
+<input
+className="w-full border p-3 rounded"
+value={cpf}
+onChange={e=>setCpf(e.target.value)}
+/>
+</div>
+
+
+<div>
+<label className="block text-sm font-bold mb-1">
+Ticket médio da empresa
+</label>
+
+<input
+type="number"
+className="w-full border p-3 rounded"
+value={ticket}
+onChange={e=>setTicket(e.target.value)}
+/>
+</div>
+
+
+<div>
+<label className="block text-sm font-bold mb-1">
+Valor da venda
+</label>
+<input
+type="number"
+className="w-full border p-3 rounded"
+value={valor}
+onChange={e=>setValor(e.target.value)}
+/>
+
+</div>
+
+<div className="mt-8 p-6 rounded-xl bg-slate-100">
+
+<p className="text-sm">
+Resultado da análise:
+</p>
+
+<p className="text-3xl font-bold mt-2">
+
+{risco==="ALTO" && <span className="text-red-600">RISCO ALTO</span>}
+
+{risco==="MÉDIO" && <span className="text-yellow-600">RISCO MÉDIO</span>}
+
+{risco==="BAIXO" && <span className="text-green-600">RISCO BAIXO</span>}
+
+</p>
+
+</div>
+
+</div>
+
+</div>
+
+)
+
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App/>)
+
+</script>
+
+</body>
+</html>
